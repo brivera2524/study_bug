@@ -1,0 +1,6 @@
+chromadb
+pymupdf4llm
+langchain-text-splitters
+sentence-transformers
+anthropic
+python-dotenv
