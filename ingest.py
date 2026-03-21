@@ -6,6 +6,8 @@ from pathlib import Path
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
+
+
 # create the embedding function with GPU for ingest
 ef = SentenceTransformerEmbeddingFunction(
     model_name="all-MiniLM-L6-v2",
@@ -42,54 +44,54 @@ for textbook_name in textbook_names:
     chunks = json.loads(cache_file.read_text(encoding="utf8"))
 
 
-# # Currently one chunk per page, reduce further for more specific retrieval
-# splitter = RecursiveCharacterTextSplitter(
-#     chunk_size=512,
-#     chunk_overlap=64
-# )
+# Currently one chunk per page, reduce further for more specific retrieval
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=512,
+    chunk_overlap=64
+)
 
-# final_chunks = []
-# for chunk in chunks:
-#     page_text = chunk["text"]
-#     page_number = chunk["metadata"]["page_number"]
-#     source = chunk["metadata"]["file_path"]
+final_chunks = []
+for chunk in chunks:
+    page_text = chunk["text"]
+    page_number = chunk["metadata"]["page_number"]
+    source = chunk["metadata"]["file_path"]
     
-#     sub_chunks = splitter.split_text(page_text)
+    sub_chunks = splitter.split_text(page_text)
     
-#     for i, sub_chunk in enumerate(sub_chunks):
-#         final_chunks.append({
-#             "text": sub_chunk,
-#             "page": page_number,
-#             "source": source,
-#             "chunk_index": i
-#         })
+    for i, sub_chunk in enumerate(sub_chunks):
+        final_chunks.append({
+            "text": sub_chunk,
+            "page": page_number,
+            "source": source,
+            "chunk_index": i
+        })
 
 
-# # add in batches to respect ChromaDB's limit
-# BATCH_SIZE = 500
+# add in batches to respect ChromaDB's limit
+BATCH_SIZE = 500
 
-# ids = [str(uuid.uuid4()) for _ in final_chunks]
-# documents = [chunk["text"] for chunk in final_chunks]
-# metadatas = [{
-#     "chunk_index": chunk["chunk_index"],
-#     "page": chunk["page"],
-#     "source": chunk["source"]
-# } for chunk in final_chunks]
+ids = [str(uuid.uuid4()) for _ in final_chunks]
+documents = [chunk["text"] for chunk in final_chunks]
+metadatas = [{
+    "chunk_index": chunk["chunk_index"],
+    "page": chunk["page"],
+    "source": chunk["source"]
+} for chunk in final_chunks]
 
-# for i in range(0, len(final_chunks), BATCH_SIZE):
-#     collection.add(
-#         ids=ids[i:i + BATCH_SIZE],
-#         documents=documents[i:i + BATCH_SIZE],
-#         metadatas=metadatas[i:i + BATCH_SIZE]
-#     )
-#     print(f"Added chunks {i} to {min(i + BATCH_SIZE, len(final_chunks))}")
+for i in range(0, len(final_chunks), BATCH_SIZE):
+    collection.add(
+        ids=ids[i:i + BATCH_SIZE],
+        documents=documents[i:i + BATCH_SIZE],
+        metadatas=metadatas[i:i + BATCH_SIZE]
+    )
+    print(f"Added chunks {i} to {min(i + BATCH_SIZE, len(final_chunks))}")
 
-# print(f"Total chunks stored: {collection.count()}")
+print(f"Total chunks stored: {collection.count()}")
 
-
+query = "What is the reversal agent for opiods?"
 
 results = collection.query(
-    query_texts=["what is the reversal agent for opiod overdose"],
+    query_texts=query,
     n_results=10
 )
 
