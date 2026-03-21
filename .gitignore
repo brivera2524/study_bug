@@ -214,3 +214,6 @@ chroma_data/
 # Textbook files
 textbooks/pdf/
 textbooks/cache/
+
+# Manifest
+manifest.json

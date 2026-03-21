@@ -10,11 +10,11 @@ from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunct
 class Embedder():
     
 
-    def __init__(self, db_path: Path, collection_name: str, data_dir: Path):
+    def __init__(self, db_path: Path, collection_name: str, data_dir: Path, device: str):
         self.client = chromadb.PersistentClient(path=db_path)
         ef = SentenceTransformerEmbeddingFunction(
             model_name="all-MiniLM-L6-v2",
-            device="cuda"
+            device=device
             )
         self.collection = self.client.get_or_create_collection(
             name=collection_name,
@@ -28,6 +28,8 @@ class Embedder():
         self.cache_dir = data_dir / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.BATCH_SIZE = 500
+        self.manifest_file = Path("manifest.json")
+        self.manifest = json.loads(self.manifest_file.read_text(encoding="utf8")) if self.manifest_file.exists() else []
 
     
     def process_docs_to_chunks(self): 
@@ -49,23 +51,28 @@ class Embedder():
                 print(f"{pdf_file.name} Already cached.")
 
             chunks = json.loads(cache_file.read_text(encoding="utf8"))
-            all_chunks.append(chunks)
+            all_chunks.append((pdf_file.stem, chunks))
 
         return all_chunks
 
 
 
-    def embed_all_chunks(self, all_chunks: list[dict]):
-        final_chunks = []
+    def embed_all_chunks(self, all_chunks: list):
 
-        for chunk_dict in all_chunks:
-            for chunk in chunk_dict:
+
+        for stem, chunk_list in all_chunks:
+            if stem in self.manifest:
+                print(f"{stem} already embedded, skipping")
+                continue
+
+            final_chunks = []
+            for chunk in chunk_list:
                 page_text = chunk["text"]
                 page_number = chunk["metadata"]["page_number"]
                 source = chunk["metadata"]["file_path"]
-                
+
                 sub_chunks = self.splitter.split_text(page_text)
-                
+
                 for i, sub_chunk in enumerate(sub_chunks):
                     final_chunks.append({
                         "text": sub_chunk,
@@ -74,32 +81,36 @@ class Embedder():
                         "chunk_index": i
                     })
 
-        ids = [str(uuid.uuid4()) for _ in final_chunks]
-        documents = [chunk["text"] for chunk in final_chunks]
-        metadatas = [{
-            "chunk_index": chunk["chunk_index"],
-            "page": chunk["page"],
-            "source": chunk["source"]
-        } for chunk in final_chunks]
+            ids = [str(uuid.uuid4()) for _ in final_chunks]
+            documents = [chunk["text"] for chunk in final_chunks]
+            metadatas = [{
+                "chunk_index": chunk["chunk_index"],
+                "page": chunk["page"],
+                "source": chunk["source"]
+            } for chunk in final_chunks]
 
-        for i in range(0, len(final_chunks), self.BATCH_SIZE):
-            self.collection.add(
-                ids=ids[i:i + self.BATCH_SIZE],
-                documents=documents[i:i + self.BATCH_SIZE],
-                metadatas=metadatas[i:i + self.BATCH_SIZE]
-            )
-            print(f"Added chunks {i} to {min(i + self.BATCH_SIZE, len(final_chunks))}")
+            for i in range(0, len(final_chunks), self.BATCH_SIZE):
+                self.collection.add(
+                    ids=ids[i:i + self.BATCH_SIZE],
+                    documents=documents[i:i + self.BATCH_SIZE],
+                    metadatas=metadatas[i:i + self.BATCH_SIZE]
+                )
+                print(f"Added chunks {i} to {min(i + self.BATCH_SIZE, len(final_chunks))}")
+
+            self.manifest.append(stem)
+            self.manifest_file.write_text(json.dumps(self.manifest, indent=2), encoding="utf8")
+            print(f"Marked {stem} as ingested")
 
         print(f"Total chunks stored: {self.collection.count()}")
 
 
 if __name__ == "__main__":
 
-    embedder = Embedder(db_path=Path("chroma_data/"), collection_name="textbooks", data_dir=Path("textbooks/"))
+    embedder = Embedder(db_path=Path("chroma_data/"), collection_name="textbooks", data_dir=Path("textbooks/"), device="cpu")
     all_chunks = embedder.process_docs_to_chunks()
     embedder.embed_all_chunks(all_chunks)
 
-    query = ["What is the reversal agent for opiods?"]
+    query = ["What are the nursing interventions for a patient with hyperkalemia"]
 
     results = embedder.collection.query(
         query_texts=query,
