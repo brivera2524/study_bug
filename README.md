@@ -10,17 +10,5 @@ Install with the correct CUDA version for your system: https://pytorch.org/get-s
 ### 2. Install dependencies
 pip install -r requirements.txt
 
-### 3. Add environment variables
-Create a .env file in the project root:
-ANTHROPIC_API_KEY=sk-ant-...
-
-### 4. Add PDFs
+### 3. Add PDFs
 Drop PDF files into textbooks/pdf/
-
-## Usage
-
-# ingest documents
-python ingest.py --mode ingest
-
-# query
-python ingest.py --mode query --query "what is the reversal agent for opioid overdose"
