@@ -9,39 +9,15 @@ from typing import Any
 
 
 class Embedder():
-    """Handles PDF ingestion, chunking, and embedding into ChromaDB.
+    """Ingests PDFs into ChromaDB and handles similarity search."""
 
-    Extracts text from PDFs using pymupdf4llm, splits into chunks using
-    LangChain's RecursiveCharacterTextSplitter, and stores embeddings
-    in a persistent ChromaDB collection using sentence-transformers.
-
-    Attributes:
-        collection: ChromaDB collection for storing and querying embeddings.
-        splitter: LangChain text splitter for chunking page text.
-        pdf_dir: Path to directory containing source PDF files.
-        cache_dir: Path to directory for caching extracted JSON files.
-        manifest: List of already-ingested PDF stems.
-    """
-
-    def __init__(self, db_path: Path, collection_name: str, device: str):
-        """Initialize the Embedder with ChromaDB client and embedding function.
-
-        Sets up a persistent ChromaDB client, creates or connects to an existing
-        collection with a sentence-transformers embedding function, and loads
-        the ingestion manifest to track previously embedded documents.
-
+    def __init__(self, db_path: str | Path, collection_name: str, device: str):
+        """Set up ChromaDB client, embedding model, and manifest.
+        
         Args:
-            db_path: Path to the persistent ChromaDB storage directory.
-                Will be created if it does not exist.
-            collection_name: Name of the ChromaDB collection to use or create.
-            data_dir: Root directory containing pdf/ and cache/ subdirectories.
-            device: Device for sentence-transformers inference.
-                Use 'cuda' for GPU-accelerated ingestion, 'cpu' for query time.
-
-        Raises:
-            FileNotFoundError: If data_dir does not exist.
-            ValueError: If device is not 'cuda' or 'cpu'.
-            RuntimeError: If ChromaDB client fails to initialize.
+            db_path: Path to persistent ChromaDB storage directory.
+            collection_name: Name of the collection to use or create.
+            device: 'cuda' or 'cpu' for sentence-transformers inference.
         """
         
 
@@ -66,16 +42,16 @@ class Embedder():
         except Exception as e:
             raise RuntimeError(f"Failed to load embedding model or create collection: {e}") from e
         
-
-
+        
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=512,
             chunk_overlap=64
         )
-        
+
+
         self.BATCH_SIZE  = 500
-        
-        self.manifest_file = Path("manifest.json")
+
+        self.manifest_file = Path(db_path) / "manifest.json"
         try:
             self.manifest = json.loads(
                 self.manifest_file.read_text(encoding="utf8")
@@ -84,43 +60,64 @@ class Embedder():
             raise RuntimeError(f"Manifest file is corrupted at {self.manifest_file}: {e}") from e
 
 
-    def _split_chunks(self, chunks: dict[str, Any]) -> list[dict]:
-            split_chunks = []
-            for chunk in chunks:
-                page_text = chunk["text"]
-                page_number = chunk["metadata"]["page_number"]
-                source = chunk["metadata"]["file_path"]
+    def _split_chunks(self, chunks: list[dict[str, Any]]) -> list[dict]:
+        """Splits page-level chunks into smaller sub-chunks for embedding.
+        
+        Args:
+            chunks: List of page dicts from pymupdf4llm, each containing
+                    'text' and 'metadata' keys.
+        
+        Returns:
+            List of sub-chunk dicts with 'text', 'page', 'source', and 'chunk_index'.
+        """
+        
+        split_chunks = []
+        for chunk in chunks:
+            page_text = chunk["text"]
+            page_number = chunk["metadata"]["page_number"]
+            source = chunk["metadata"]["file_path"]
 
-                sub_chunks = self.splitter.split_text(page_text)
+            sub_chunks = self.splitter.split_text(page_text)
 
-                for i, sub_chunk in enumerate(sub_chunks):
-                    split_chunks.append({
-                        "text": sub_chunk,
-                        "page": page_number,
-                        "source": source,
-                        "chunk_index": i
-                    })
-            return split_chunks
+            for i, sub_chunk in enumerate(sub_chunks):
+                split_chunks.append({
+                    "text": sub_chunk,
+                    "page": page_number,
+                    "source": source,
+                    "chunk_index": i
+                })
+        return split_chunks
     
 
-    # Iterate through every file in pdf/ if it has existing cache, good. if not, chunk it
-    def _process_docs_to_chunks(self, data_dir: Path) -> list[tuple]:
 
+    def _load_chunks(self, data_dir: Path) -> list[tuple[str, list[dict]]]:
+        """Loads and caches chunks from all PDFs in data_dir/pdf/.
+
+        Extracts and splits new PDFs, writing results to data_dir/cache/.
+        Already-cached PDFs are loaded directly from disk.
+
+        Args:
+            data_dir: Root directory containing pdf/ and cache/ subdirectories.
+
+        Returns:
+            List of (stem, chunks) tuples where stem is the PDF filename
+            without extension and chunks is the list of sub-chunk dicts.
+        """
         if not data_dir.exists():
             raise FileNotFoundError(f"Data directory not found: {data_dir}")
         
 
-        self.pdf_dir = data_dir / "pdf"
-        self.cache_dir = data_dir / "cache"
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        pdf_dir = data_dir / "pdf"
+        cache_dir = data_dir / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
 
-        cached_stems = {f.stem for f in self.cache_dir.glob("*.json")}
+        cached_stems = {f.stem for f in cache_dir.glob("*.json")}
 
         final_chunks = []
 
-        for pdf_file in self.pdf_dir.glob("*.pdf"):
-            cache_file = self.cache_dir / (pdf_file.stem + ".json")
+        for pdf_file in pdf_dir.glob("*.pdf"):
+            cache_file = cache_dir / (pdf_file.stem + ".json")
 
             if pdf_file.stem not in cached_stems:
                 chunks = pymupdf4llm.to_markdown(str(pdf_file), page_chunks=True)
@@ -140,7 +137,12 @@ class Embedder():
 
 
 
-    def _embed_all_chunks(self, all_chunks: list):
+    def _upsert_chunks(self, all_chunks: list[tuple[str, list[dict]]]):
+        """Embeds and upserts chunks into ChromaDB, skipping already-ingested documents.
+
+        Args:
+            all_chunks: List of (stem, chunks) tuples as returned by _load_chunks.
+        """
         for stem, chunk_list in all_chunks:
             if stem in self.manifest:
                 print(f"{stem} already embedded, skipping")
@@ -170,17 +172,25 @@ class Embedder():
 
 
 
-    def ingest(self, data_dir: str):
+    def ingest(self, data_dir: Path | str):
+        """Ingests all PDFs from data_dir into ChromaDB.
+
+        Args:
+            data_dir: Root directory containing pdf/ and cache/ subdirectories.
+        """
         data_dir = Path(data_dir)
-        all_chunks = self._process_docs_to_chunks(data_dir)
-        self._embed_all_chunks(all_chunks)
+        all_chunks = self._load_chunks(data_dir)
+        self._upsert_chunks(all_chunks)
 
 
     def query(self, query: list[str], n_results: int) -> chromadb.QueryResult:
-        
+        """Searches the collection for chunks similar to the query.
+
+        Args:
+            query: List of query strings to search for.
+            n_results: Number of results to return per query.
+        """
         return self.collection.query(query_texts=query,n_results=n_results)
-
-
 
 
 if __name__ == "__main__":
@@ -192,7 +202,7 @@ if __name__ == "__main__":
 
     results = embedder.query(query=["How much morphine will cause an overdose?"],n_results=5)
 
-    # access the results for
+    # access the results
     docs = results["documents"][0]
     metas = results["metadatas"][0]
     distances = results["distances"][0]
