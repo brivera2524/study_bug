@@ -212,8 +212,8 @@ __marimo__/
 chroma_data/
 
 # Textbook files
-textbooks/pdf/
-textbooks/cache/
+textbooks/
+
 
 # Manifest
 manifest.json
