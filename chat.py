@@ -53,8 +53,7 @@ class Chat():
         )
 
         assistant_text_response = (list(runner)[-1]).content[0].text
-
-
+        
         new_assistant_message = {"role": "assistant", "content": f"{assistant_text_response}"}
         
         self.messages.append(new_assistant_message)

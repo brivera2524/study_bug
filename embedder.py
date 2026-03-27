@@ -191,7 +191,6 @@ class Embedder():
             n_results: Number of results to return per query.
         """
         raw_results = self.collection.query(query_texts=[query],n_results=n_results)
-
         processed_results = []
 
 
