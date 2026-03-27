@@ -1,12 +1,16 @@
 from embedder import Embedder
 import os
 from dotenv import load_dotenv
-from anthropic import Anthropic, beta_tool
+from anthropic import Anthropic, beta_tool, AuthenticationError
 
 
 class Chat():
     def __init__(self, embedder: Embedder):
         load_dotenv()
+
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            raise ValueError("ANTHROPIC_API_KEY environment variable must be defined.")
+
         self.embedder = embedder
         self.client = Anthropic()
         self.rag_tool = self._make_rag_tool()
@@ -59,5 +63,6 @@ class Chat():
         self.messages.append(new_assistant_message)
 
         return assistant_text_response
+
 
     
