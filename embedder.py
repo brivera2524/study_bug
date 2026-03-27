@@ -183,13 +183,34 @@ class Embedder():
         self._upsert_chunks(all_chunks)
 
 
-    def query(self, query: list[str], n_results: int) -> chromadb.QueryResult:
+    def query(self, query: str, n_results: int) -> chromadb.QueryResult:
         """Searches the collection for chunks similar to the query.
 
         Args:
             query: List of query strings to search for.
             n_results: Number of results to return per query.
         """
-        return self.collection.query(query_texts=query,n_results=n_results)
+        raw_results = self.collection.query(query_texts=[query],n_results=n_results)
+
+        processed_results = []
 
 
+        all_docs = raw_results["documents"][0]
+        all_ids = raw_results["ids"][0]
+        all_distances = raw_results["distances"][0]
+        all_metadatas = raw_results["metadatas"][0]
+
+
+        for i in range(len(all_docs)):
+
+            current_result = {
+                "document": all_docs[i],
+                "id": all_ids[i],
+                "distance": all_distances[i],
+                "source": all_metadatas[i]["source"],
+                "page": all_metadatas[i]["page"]
+            }
+
+            processed_results.append(current_result)
+
+        return processed_results
