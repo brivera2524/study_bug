@@ -1,7 +1,7 @@
 from embedder import Embedder
 import os
 from dotenv import load_dotenv
-from anthropic import Anthropic, beta_tool, AuthenticationError
+from anthropic import Anthropic, beta_tool
 
 
 class Chat():
@@ -22,36 +22,49 @@ class Chat():
         embedder = self.embedder
     
         @beta_tool
-        def RAG_query(query_text: str) -> list[dict]:
-            """Query the nursing textbook collection for relevant content.
+        def RAG_query(query_text: str, n_results: int) -> list[dict]:
+            """Query the fishing regulations for relevant content.
             
             Use this when the user asks a question that requires information
-            from the textbooks. Do not use for conversational follow-ups like
+            from the regulations documents. Do not use for conversational follow-ups like
             rephrasing, shortening, or formatting previous responses.
+
+            The context sources are written like a formal government regulations booklet.
+            The language is dense, rule-based, and highly structured. It uses legal
+            and administrative wording rather than conversational explanation. The document 
+            repeatedly uses exact regulatory terms, section references, and formulaic phrasing, 
+            so retrieval should prioritize literal terminology over loose paraphrase.
+
+            To create the best query_text input, generate a hypothetical answer to the following
+            question as if you were an expert. Be specific and use domain-appropriate terminology.
+            Do not hedge or say you don't know. Commit to a plausible answer. Use this answer as query_text.
+
+            Additionally, optimize n_results based on the query.
             
             Args:
                 query_text: The search query to run against the textbook collection.
+                n_reults: The number of unique pieces of context to return.
             
             Returns:
                 A list of relevant text chunks with source and page metadata.
             """
-
-            return str(embedder.query(query_text, n_results=5))
+            print(f"Model Calling RAG_query. Query: {query_text}, n_results:{n_results}")
+            return str(embedder.query(query_text, n_results=n_results))
             
         
         return RAG_query
 
     
-    def get_model_response(self, prompt: str) -> str:
+    def get_model_response(self, prompt: str, system_prompt:str) -> str:
 
         new_user_message = {"role": "user", "content": f"{prompt}"}
         self.messages.append(new_user_message)
 
         runner = self.client.beta.messages.tool_runner(
             max_tokens=1024,
-            model="claude-haiku-4-5",
+            model="claude-sonnet-4-6",
             # placeholder system prompt, needs refinement
-            system="You are an LLM with access to an RAG tool to gain context for your answer. Always use this tool, and cite the source and page number if you reference any context.",
+            system=system_prompt,
             tools=[self.rag_tool],
             messages=self.messages
         )
